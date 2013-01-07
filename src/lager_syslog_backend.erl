@@ -25,7 +25,7 @@
 
 -export([config_to_id/1]).
 
--record(state, {level, handle, id, formatter,format_config}).
+-record(state, {level, pid, id, formatter,format_config}).
 
 -include_lib("lager/include/lager.hrl").
 
@@ -54,13 +54,13 @@ init([Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Level)
 
 %% @private
 init2([Ident, Facility, Level, {Formatter, FormatterConfig}]) ->
-    case syslog:open(Ident, [pid], Facility) of
-        {ok, Log} ->
+    case syslog:start_link(list_to_atom(Ident), list_to_atom(Ident), "localhost", 514, Facility) of
+        {ok, Pid} ->
             try parse_level(Level) of
                 Lvl ->
                     {ok, #state{level=Lvl,
                             id=config_to_id([Ident, Facility, Level]),
-                            handle=Log,
+                            pid=Pid,
                             formatter=Formatter,
                             format_config=FormatterConfig}}
                 catch
@@ -87,14 +87,14 @@ handle_call(_Request, State) ->
     {ok, ok, State}.
 
 %% @private
-handle_event({log, Level, {_Date, _Time}, [_LevelStr, Location, Message]},
+handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]},
         #state{level=LogLevel} = State) when Level =< LogLevel ->
-    syslog:log(State#state.handle, convert_level(Level), [Location, Message]),
+    syslog:send(State#state.pid, Message, [{level, convert_level(Level)}]),
     {ok, State};
 handle_event({log, Message}, #state{level=Level,formatter=Formatter,format_config=FormatConfig} = State) ->
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
-            syslog:log(State#state.handle, convert_level(lager_msg:severity_as_int(Message)), [Formatter:format(Message, FormatConfig)]),
+            syslog:send(State#state.pid, Formatter:format(Message, FormatConfig), [{level, convert_level(lager_msg:severity_as_int(Message))}]),
             {ok, State};
         false ->
             {ok, State}
@@ -124,10 +124,10 @@ convert_level(?DEBUG) -> debug;
 convert_level(?INFO) -> info;
 convert_level(?NOTICE) -> notice;
 convert_level(?WARNING) -> warning;
-convert_level(?ERROR) -> err;
-convert_level(?CRITICAL) -> crit;
+convert_level(?ERROR) -> error;
+convert_level(?CRITICAL) -> critical;
 convert_level(?ALERT) -> alert;
-convert_level(?EMERGENCY) -> emerg.
+convert_level(?EMERGENCY) -> emergency.
 
 parse_level(Level) ->
     try lager_util:config_to_mask(Level) of

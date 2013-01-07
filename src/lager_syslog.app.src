@@ -6,8 +6,10 @@
   {vsn, "1.2.1"},
   {modules, []},
   {applications, [
-                  kernel,
-                  stdlib
+                 kernel,
+                 stdlib,
+                 lager,
+                 syslog
                  ]},
   {registered, []}
  ]}.
