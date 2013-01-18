@@ -25,7 +25,7 @@
 
 -export([config_to_id/1]).
 
--record(state, {level, id, ident, facility, formatter, format_config}).
+-record(state, {level, log_level, id, ident, facility, formatter, format_config}).
 
 -include_lib("lager/include/lager.hrl").
 
@@ -43,20 +43,10 @@
 init([Ident, Facility, Level]) when is_atom(Level) ->
     init([Ident, Facility, Level, {lager_default_formatter, ?DEFAULT_FORMAT}]);
 init([Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Level), is_atom(Formatter) ->
-    case syslog:start_link() of
-        ok ->
-            init2([Ident, Facility, Level, {Formatter, FormatterConfig}]);
-        {error, {already_started, _}} ->
-            init2([Ident, Facility, Level, {Formatter, FormatterConfig}]);
-        Error ->
-            Error
-    end.
-
-%% @private
-init2([Ident, Facility, Level, {Formatter, FormatterConfig}]) ->
     try parse_level(Level) of
         Lvl ->
             {ok, #state{level=Lvl,
+                        log_level=Level,
                         id=config_to_id([Ident, Facility, Level]),
                         ident=Ident,
                         facility=Facility,
@@ -83,13 +73,13 @@ handle_call(_Request, State) ->
 
 %% @private
 handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]},
-        #state{level=LogLevel, ident=Ident, facility=Facility} = State) when Level =< LogLevel ->
-    syslog:send(Message, [{facility, Facility}, {ident, Ident}]),
+        #state{log_level=LogLevel, level=Level, ident=Ident, facility=Facility} = State) when Level =< LogLevel ->
+    syslog:send(Message, [{level, LogLevel}, {facility, Facility}, {ident, Ident}]),
     {ok, State};
-handle_event({log, Message}, #state{level=Level, ident=Ident, facility=Facility, formatter=Formatter,format_config=FormatConfig} = State) ->
+handle_event({log, Message}, #state{level=Level, log_level=LogLevel, ident=Ident, facility=Facility, formatter=Formatter,format_config=FormatConfig} = State) ->
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
-            syslog:send(Formatter:format(Message, FormatConfig), [{facility, Facility}, {ident, Ident}]),
+            syslog:send(Formatter:format(Message, FormatConfig), [{level, LogLevel}, {facility, Facility}, {ident, Ident}]),
             {ok, State};
         false ->
             {ok, State}
@@ -114,15 +104,6 @@ config_to_id([Ident, Facility, _Level]) ->
     {?MODULE, {Ident, Facility}};
 config_to_id([Ident, Facility, _Level, _Formatter]) ->
     {?MODULE, {Ident, Facility}}.
-
-convert_level(?DEBUG) -> debug;
-convert_level(?INFO) -> info;
-convert_level(?NOTICE) -> notice;
-convert_level(?WARNING) -> warning;
-convert_level(?ERROR) -> error;
-convert_level(?CRITICAL) -> critical;
-convert_level(?ALERT) -> alert;
-convert_level(?EMERGENCY) -> emergency.
 
 parse_level(Level) ->
     try lager_util:config_to_mask(Level) of
