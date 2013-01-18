@@ -25,7 +25,7 @@
 
 -export([config_to_id/1]).
 
--record(state, {level, pid, id, ident, facility, formatter, format_config}).
+-record(state, {level, id, ident, facility, formatter, format_config}).
 
 -include_lib("lager/include/lager.hrl").
 
@@ -43,7 +43,7 @@
 init([Ident, Facility, Level]) when is_atom(Level) ->
     init([Ident, Facility, Level, {lager_default_formatter, ?DEFAULT_FORMAT}]);
 init([Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Level), is_atom(Formatter) ->
-    case application:start(syslog) of
+    case syslog:start_link() of
         ok ->
             init2([Ident, Facility, Level, {Formatter, FormatterConfig}]);
         {error, {already_started, _}} ->
@@ -54,25 +54,18 @@ init([Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Level)
 
 %% @private
 init2([Ident, Facility, Level, {Formatter, FormatterConfig}]) ->
-    case syslog:start_link() of
-        {ok, Pid} ->
-            try parse_level(Level) of
-                Lvl ->
-                    {ok, #state{level=Lvl,
-                                id=config_to_id([Ident, Facility, Level]),
-                                pid=Pid,
-                                ident=Ident,
-                                facility=Facility,
-                                formatter=Formatter,
-                                format_config=FormatterConfig}}
-            catch
-                    _:_ ->
-                        {error, bad_log_level}
-                end;
-        Error ->
-            Error
+    try parse_level(Level) of
+        Lvl ->
+            {ok, #state{level=Lvl,
+                        id=config_to_id([Ident, Facility, Level]),
+                        ident=Ident,
+                        facility=Facility,
+                        formatter=Formatter,
+                        format_config=FormatterConfig}}
+    catch
+        _:_ ->
+            {error, bad_log_level}
     end.
-
 
 %% @private
 handle_call(get_loglevel, #state{level=Level} = State) ->
@@ -91,12 +84,12 @@ handle_call(_Request, State) ->
 %% @private
 handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]},
         #state{level=LogLevel, ident=Ident, facility=Facility} = State) when Level =< LogLevel ->
-    syslog:send(State#state.pid, Message, [{facility, Facility}, {ident, Ident}]),
+    syslog:send(Message, [{facility, Facility}, {ident, Ident}]),
     {ok, State};
 handle_event({log, Message}, #state{level=Level, ident=Ident, facility=Facility, formatter=Formatter,format_config=FormatConfig} = State) ->
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
-            syslog:send(State#state.pid, Formatter:format(Message, FormatConfig), [{facility, Facility}, {ident, Ident}]),
+            syslog:send(Formatter:format(Message, FormatConfig), [{facility, Facility}, {ident, Ident}]),
             {ok, State};
         false ->
             {ok, State}
