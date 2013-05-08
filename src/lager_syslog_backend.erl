@@ -25,7 +25,7 @@
 
 -export([config_to_id/1]).
 
--record(state, {level, log_level, id, ident, facility, formatter, format_config}).
+-record(state, {pid, level, log_level, id, ident, facility, formatter, format_config}).
 
 -include_lib("lager/include/lager.hrl").
 
@@ -41,11 +41,12 @@
 
 %% @private
 init([Ident, Facility, Level]) when is_atom(Level) ->
-    init([Ident, Facility, Level, {lager_default_formatter, ?DEFAULT_FORMAT}]);
-init([Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Level), is_atom(Formatter) ->
+    init([syslog, Ident, Facility, Level, {lager_default_formatter, ?DEFAULT_FORMAT}]);
+init([Pid, Ident, Facility, Level, {Formatter, FormatterConfig}]) when is_atom(Level), is_atom(Formatter) ->
     try parse_level(Level) of
         Lvl ->
-            {ok, #state{level=Lvl,
+            {ok, #state{pid=Pid,
+                        level=Lvl,
                         log_level=Level,
                         id=config_to_id([Ident, Facility, Level]),
                         ident=Ident,
@@ -73,13 +74,13 @@ handle_call(_Request, State) ->
 
 %% @private
 handle_event({log, Level, {_Date, _Time}, [_LevelStr, _Location, Message]},
-        #state{log_level=LogLevel, level=Level, ident=Ident, facility=Facility} = State) when Level =< LogLevel ->
-    syslog:send(Message, [{level, LogLevel}, {facility, Facility}, {ident, Ident}]),
+        #state{pid=Pid, log_level=LogLevel, level=Level, ident=Ident, facility=Facility} = State) when Level =< LogLevel ->
+    syslog:send(Pid, Message, [{level, LogLevel}, {facility, Facility}, {ident, Ident}]),
     {ok, State};
-handle_event({log, Message}, #state{level=Level, log_level=LogLevel, ident=Ident, facility=Facility, formatter=Formatter,format_config=FormatConfig} = State) ->
+handle_event({log, Message}, #state{pid=Pid, level=Level, log_level=LogLevel, ident=Ident, facility=Facility, formatter=Formatter,format_config=FormatConfig} = State) ->
     case lager_util:is_loggable(Message, Level, State#state.id) of
         true ->
-            syslog:send(Formatter:format(Message, FormatConfig), [{level, LogLevel}, {facility, Facility}, {ident, Ident}]),
+            syslog:send(Pid, Formatter:format(Message, FormatConfig), [{level, LogLevel}, {facility, Facility}, {ident, Ident}]),
             {ok, State};
         false ->
             {ok, State}
@@ -114,4 +115,3 @@ parse_level(Level) ->
             %% must be lager < 2.0
             lager_util:level_to_num(Level)
     end.
-
